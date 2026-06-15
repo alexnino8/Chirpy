@@ -52,9 +52,9 @@ func main() {
 
 	//
 
-	mux.HandleFunc("GET /healthz", readinessEndpoint)
-	mux.HandleFunc("GET /metrics", apiConfig.writeRequestsCounter)
-	mux.HandleFunc("POST /reset", apiConfig.resetFileserverHits)
+	mux.HandleFunc("GET /api/healthz", readinessEndpoint)
+	mux.HandleFunc("GET /api/metrics", apiConfig.writeRequestsCounter)
+	mux.HandleFunc("POST /api/reset", apiConfig.resetFileserverHits)
 
 	server := &http.Server{
 		Addr:    ":8080",
