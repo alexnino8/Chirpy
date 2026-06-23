@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"sync/atomic"
+
+	"github.com/alexnino8/Chirpy/internal/chirp"
 )
 
 type apiConfig struct {
@@ -44,40 +46,56 @@ func readinessEndpoint(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+func respondWithJson(w http.ResponseWriter, code int, payload any) {
+	dat, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Error marshaling JSON: %s", err)
+		w.WriteHeader(500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	w.Write(dat)
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) {
+	type errorResponse struct {
+		Error string `json:"error"`
+	}
+
+	respondWithJson(w, code, errorResponse{Error: msg})
+}
+
 func validateChirp(w http.ResponseWriter, r *http.Request) {
-	type chirp struct {
+	type parameters struct {
 		Body string `json:"body"`
 	}
 
-	type returnVal struct {
-		Valid bool   `json:"valid"`
+	type cleanedResponse struct {
+		CleanedBody string `json:"cleaned_body"`
+	}
+
+	type errorResponse struct {
 		Error string `json:"error"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
-	body := chirp{}
-	res := returnVal{}
-	err := decoder.Decode(&body)
+	params := parameters{}
+
+	err := decoder.Decode(&params)
 	if err != nil {
-		res.Error = fmt.Sprintf("Error decoding request: %v", err)
+		respondWithError(w, 400, fmt.Sprintf("Error decoding request: %s", err))
+		return
 	}
 
-	if len(body.Body) > 140 {
-		res.Error = "Chirp is too long"
-		w.WriteHeader(400)
-	} else {
-		res.Valid = true
-		w.WriteHeader(200)
+	if !chirp.ValidateLength(params.Body) {
+		respondWithError(w, 400, "Chirp is too long")
+		return
 	}
 
-	dat, err := json.Marshal(res)
-	if err != nil {
-		log.Printf("Error marshaling JSON: %s", err)
-		w.WriteHeader(500)
-	}
+	res := cleanedResponse{CleanedBody: chirp.RedactProfaneWords(params.Body)}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(dat)
+	respondWithJson(w, 200, res)
 }
 
 func main() {
