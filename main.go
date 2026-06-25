@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/alexnino8/Chirpy/internal/chirp"
 	"github.com/alexnino8/Chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -18,6 +20,14 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+}
+
+// user struct
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -50,6 +60,37 @@ func readinessEndpoint(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
+}
+
+func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
+	//define the struct to decode the request into
+	type parameters struct {
+		Email string `json:"email"`
+	}
+
+	// decode the request in the new instance of the parameters struct
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error decoding request: %s", err))
+		return
+	}
+
+	// send the query to create the new user -> get a database.User
+	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Couldn't create user: %s", err))
+	}
+
+	// respond with the details of the new user created (using User struct)
+	respondWithJson(w, 201, User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
+
 }
 
 func respondWithJson(w http.ResponseWriter, code int, payload any) {
@@ -128,6 +169,9 @@ func main() {
 	//api endpoints
 	mux.HandleFunc("GET /api/healthz", readinessEndpoint)
 	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+
+	// create user endpoint
+	mux.HandleFunc("POST /api/users", apiConfig.createUser)
 
 	// admin endpoints
 	mux.HandleFunc("GET /admin/metrics", apiConfig.writeRequestsCounter)
