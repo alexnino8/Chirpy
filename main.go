@@ -20,6 +20,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string
 }
 
 // user struct
@@ -51,7 +52,17 @@ func (cfg *apiConfig) writeRequestsCounter(w http.ResponseWriter, r *http.Reques
 	fmt.Fprint(w, out)
 }
 
-func (cfg *apiConfig) resetFileserverHits(w http.ResponseWriter, _ *http.Request) {
+func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(w, 403, "Forbidden")
+		return
+	}
+
+	err := cfg.dbQueries.DeleteUsers(r.Context())
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Couldn't delete users: %s", err))
+	}
+
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
 }
@@ -153,10 +164,12 @@ func main() {
 		log.Fatal(err)
 	}
 	dbQueries := database.New(db)
+	platform := os.Getenv("PLATFORM")
 
 	apiConfig := apiConfig{
 		fileserverHits: atomic.Int32{},
 		dbQueries:      dbQueries,
+		platform:       platform,
 	}
 
 	fileServerHandler := http.StripPrefix("/app", http.FileServer(http.Dir(".")))
@@ -175,7 +188,7 @@ func main() {
 
 	// admin endpoints
 	mux.HandleFunc("GET /admin/metrics", apiConfig.writeRequestsCounter)
-	mux.HandleFunc("POST /admin/reset", apiConfig.resetFileserverHits)
+	mux.HandleFunc("POST /admin/reset", apiConfig.reset)
 
 	server := &http.Server{
 		Addr:    ":8080",
