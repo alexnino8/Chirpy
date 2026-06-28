@@ -31,6 +31,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cfg.fileserverHits.Add(1)
@@ -61,6 +69,7 @@ func (cfg *apiConfig) reset(w http.ResponseWriter, r *http.Request) {
 	err := cfg.dbQueries.DeleteUsers(r.Context())
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Couldn't delete users: %s", err))
+		return
 	}
 
 	cfg.fileserverHits.Store(0)
@@ -92,6 +101,7 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Couldn't create user: %s", err))
+		return
 	}
 
 	// respond with the details of the new user created (using User struct)
@@ -100,6 +110,52 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+	})
+
+}
+
+func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
+	//define the struct to decode the request into
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
+	}
+
+	// decode the request in the new instance of the parameters struct
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error decoding request: %s", err))
+		return
+	}
+
+	// Validate chirp
+	if !chirp.ValidateLength(params.Body) {
+		respondWithError(w, 400, "Chirp is too long")
+		return
+	}
+
+	// redact profane words
+	params.Body = chirp.RedactProfaneWords(params.Body)
+
+	// send the query to create the new chirp -> get a database.Chirp
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   params.Body,
+		UserID: params.UserID,
+	})
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Couldn't create chirp: %s", err))
+		return
+	}
+
+	// respond with the details of the new chirp created (using Chirp struct)
+	respondWithJson(w, 201, Chirp{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	})
 
 }
@@ -122,38 +178,6 @@ func respondWithError(w http.ResponseWriter, code int, msg string) {
 	}
 
 	respondWithJson(w, code, errorResponse{Error: msg})
-}
-
-func validateChirp(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-
-	type cleanedResponse struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	type errorResponse struct {
-		Error string `json:"error"`
-	}
-
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-
-	err := decoder.Decode(&params)
-	if err != nil {
-		respondWithError(w, 400, fmt.Sprintf("Error decoding request: %s", err))
-		return
-	}
-
-	if !chirp.ValidateLength(params.Body) {
-		respondWithError(w, 400, "Chirp is too long")
-		return
-	}
-
-	res := cleanedResponse{CleanedBody: chirp.RedactProfaneWords(params.Body)}
-
-	respondWithJson(w, 200, res)
 }
 
 func main() {
@@ -181,7 +205,9 @@ func main() {
 
 	//api endpoints
 	mux.HandleFunc("GET /api/healthz", readinessEndpoint)
-	mux.HandleFunc("POST /api/validate_chirp", validateChirp)
+
+	// create chirp endpoint
+	mux.HandleFunc("POST /api/chirps", apiConfig.createChirp)
 
 	// create user endpoint
 	mux.HandleFunc("POST /api/users", apiConfig.createUser)
