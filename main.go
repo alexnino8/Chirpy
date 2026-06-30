@@ -160,6 +160,10 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
+
+}
+
 func respondWithJson(w http.ResponseWriter, code int, payload any) {
 	dat, err := json.Marshal(payload)
 	if err != nil {
@@ -208,6 +212,9 @@ func main() {
 
 	// create chirp endpoint
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirp)
+
+	// get all chirps endpoint
+	mux.HandleFunc("GET /api/chirps", apiConfig.getChirps)
 
 	// create user endpoint
 	mux.HandleFunc("POST /api/users", apiConfig.createUser)
