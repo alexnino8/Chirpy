@@ -161,7 +161,25 @@ func (cfg *apiConfig) createChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
+	// need to return an array of chirps
+	dbChirps, err := cfg.dbQueries.GetChirps(r.Context())
+	if err != nil {
+		respondWithError(w, 500, fmt.Sprintf("Couldn't retrieve chirps: %s", err))
+		return
+	}
 
+	apiChirps := []Chirp{}
+	for _, dbChirp := range dbChirps {
+		apiChirps = append(apiChirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			Body:      dbChirp.Body,
+			UserID:    dbChirp.UserID,
+		})
+	}
+
+	respondWithJson(w, 200, apiChirps)
 }
 
 func respondWithJson(w http.ResponseWriter, code int, payload any) {

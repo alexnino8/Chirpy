@@ -11,4 +11,5 @@ RETURNING *;
 
 
 -- name: GetChirps :many
-SELECT * from chirps;
+SELECT * from chirps
+ORDER BY created_at;
