@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexnino8/Chirpy/internal/auth"
 	"github.com/alexnino8/Chirpy/internal/chirp"
 	"github.com/alexnino8/Chirpy/internal/database"
 	"github.com/google/uuid"
@@ -82,10 +83,46 @@ func readinessEndpoint(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+func (cfg *apiConfig) login(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		respondWithError(w, 400, fmt.Sprintf("Error decoding request: %s", err))
+		return
+	}
+
+	dbUser, err := cfg.dbQueries.GetUserByEmail(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	match, err := auth.CheckPasswordHash(params.Password, dbUser.HashedPassword)
+	if err != nil || !match {
+		respondWithError(w, http.StatusUnauthorized, "Incorrect email or password")
+		return
+	}
+
+	respondWithJson(w, http.StatusOK, User{
+		ID:        dbUser.ID,
+		CreatedAt: dbUser.CreatedAt,
+		UpdatedAt: dbUser.UpdatedAt,
+		Email:     dbUser.Email,
+	})
+
+}
+
 func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 	//define the struct to decode the request into
 	type parameters struct {
-		Email string `json:"email"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	// decode the request in the new instance of the parameters struct
@@ -97,8 +134,16 @@ func (cfg *apiConfig) createUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		log.Fatal("Error hashing password")
+	}
+
 	// send the query to create the new user -> get a database.User
-	user, err := cfg.dbQueries.CreateUser(r.Context(), params.Email)
+	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+		HashedPassword: hashedPassword,
+		Email:          params.Email,
+	})
 	if err != nil {
 		respondWithError(w, 500, fmt.Sprintf("Couldn't create user: %s", err))
 		return
@@ -253,8 +298,11 @@ func main() {
 	mux.Handle("/app/", wrappedHandler)
 	mux.Handle("/assets/logo.png", http.FileServer(http.Dir(".")))
 
-	//api endpoints
+	// api endpoints
 	mux.HandleFunc("GET /api/healthz", readinessEndpoint)
+
+	// login endpoint
+	mux.HandleFunc("POST /api/login", apiConfig.login)
 
 	// create chirp endpoint
 	mux.HandleFunc("POST /api/chirps", apiConfig.createChirp)
