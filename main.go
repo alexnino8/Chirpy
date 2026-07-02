@@ -182,6 +182,34 @@ func (cfg *apiConfig) getChirps(w http.ResponseWriter, r *http.Request) {
 	respondWithJson(w, 200, apiChirps)
 }
 
+func (cfg *apiConfig) getChirp(w http.ResponseWriter, r *http.Request) {
+
+	chirpIDStr := r.PathValue("chirpID")
+	id, err := uuid.Parse((chirpIDStr))
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid UUID format")
+		// http.Error(w, "Invalid UUID format", http.StatusBadRequest)
+		return
+	}
+
+	dbChirp, err := cfg.dbQueries.GetChirp(r.Context(), id)
+	if err != nil {
+		respondWithError(w, 404, fmt.Sprintf("Error: %s", err))
+		return
+	}
+
+	chirp := Chirp{
+		ID:        dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		Body:      dbChirp.Body,
+		UserID:    dbChirp.UserID,
+	}
+
+	respondWithJson(w, 200, chirp)
+
+}
+
 func respondWithJson(w http.ResponseWriter, code int, payload any) {
 	dat, err := json.Marshal(payload)
 	if err != nil {
@@ -233,6 +261,9 @@ func main() {
 
 	// get all chirps endpoint
 	mux.HandleFunc("GET /api/chirps", apiConfig.getChirps)
+
+	// get one chirp by id
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiConfig.getChirp)
 
 	// create user endpoint
 	mux.HandleFunc("POST /api/users", apiConfig.createUser)
